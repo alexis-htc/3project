@@ -3,8 +3,11 @@
 import sqlite3
 import os
 import json
+import logging
 from datetime import datetime
 from langchain.tools import tool
+
+logger = logging.getLogger("uda_hub.tools.refund")
 
 
 def create_refund_processing_tool(db_path: str):
@@ -82,7 +85,7 @@ def create_refund_processing_tool(db_path: str):
             )
             conn.commit()
 
-            return json.dumps({
+            result = {
                 "success": True,
                 "refund_id": f"REF-{target_payment['id']:05d}",
                 "customer_id": customer_id,
@@ -94,9 +97,24 @@ def create_refund_processing_tool(db_path: str):
                 "refund_method": "original payment method",
                 "processing_time": "5-10 business days",
                 "processed_at": now,
-            }, indent=2)
+            }
+            logger.info(
+                "Refund processed",
+                extra={
+                    "event": "tool_call",
+                    "operation": "refund_processing",
+                    "outcome": "success",
+                    "customer_id": customer_id,
+                    "result": {"refund_id": result["refund_id"], "amount": refund_amount},
+                },
+            )
+            return json.dumps(result, indent=2)
 
         except Exception as e:
+            logger.error(
+                f"Refund error: {e}",
+                extra={"event": "tool_call", "operation": "refund_processing", "outcome": "error"},
+            )
             return f"Error processing refund: {str(e)}"
         finally:
             conn.close()

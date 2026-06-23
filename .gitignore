@@ -8,8 +8,9 @@ __pycache__/
 *.db
 data/core/chroma_db/
 
-# Logs and sessions
-logs/
+# Logs and sessions (keep demo log as evidence artifact)
+logs/*
+!logs/demo_output.jsonl
 sessions/
 
 # IDE

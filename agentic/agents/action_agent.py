@@ -1,9 +1,12 @@
 """Action agent: executes support operations via tools."""
 
+import logging
 from typing import Dict, Any
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.prebuilt import create_react_agent
+
+logger = logging.getLogger("uda_hub.agents.action")
 
 
 ACTION_SYSTEM_PROMPT = """You are a support operations agent for CultPass.
@@ -51,6 +54,17 @@ def execute_action(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, A
     result = agent.invoke({"messages": messages})
     result_messages = result.get("messages", [])
     tools_used = [m.name for m in result_messages if isinstance(m, ToolMessage)]
+
+    logger.info(
+        "Action executed",
+        extra={
+            "event": "action",
+            "node": "action_agent",
+            "ticket_id": state.get("ticket_id"),
+            "tools_used": tools_used,
+            "customer_id": customer_id,
+        },
+    )
 
     return {
         "messages": result_messages,
