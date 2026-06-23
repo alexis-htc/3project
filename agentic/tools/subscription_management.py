@@ -3,8 +3,11 @@
 import sqlite3
 import os
 import json
+import logging
 from datetime import datetime
 from langchain.tools import tool
+
+logger = logging.getLogger("uda_hub.tools.subscription")
 
 
 def create_subscription_management_tool(db_path: str):
@@ -53,6 +56,16 @@ def create_subscription_management_tool(db_path: str):
             current_plan = sub["plan"]
 
             if action == "check":
+                logger.info(
+                    "Subscription check",
+                    extra={
+                        "event": "tool_call",
+                        "operation": "subscription_management",
+                        "action": "check",
+                        "outcome": "success",
+                        "customer_id": customer_id,
+                    },
+                )
                 return json.dumps({
                     "customer_id": customer_id,
                     "customer_name": sub["name"],
@@ -88,6 +101,17 @@ def create_subscription_management_tool(db_path: str):
                 )
                 conn.commit()
 
+                logger.info(
+                    f"Subscription {action}",
+                    extra={
+                        "event": "tool_call",
+                        "operation": "subscription_management",
+                        "action": action,
+                        "outcome": "success",
+                        "customer_id": customer_id,
+                        "result": {"from": current_plan, "to": new_plan_lower},
+                    },
+                )
                 return json.dumps({
                     "success": True,
                     "action": action,
@@ -110,6 +134,16 @@ def create_subscription_management_tool(db_path: str):
                 )
                 conn.commit()
 
+                logger.info(
+                    "Subscription cancelled",
+                    extra={
+                        "event": "tool_call",
+                        "operation": "subscription_management",
+                        "action": "cancel",
+                        "outcome": "success",
+                        "customer_id": customer_id,
+                    },
+                )
                 return json.dumps({
                     "success": True,
                     "action": "cancel",
@@ -123,6 +157,10 @@ def create_subscription_management_tool(db_path: str):
             return f"Unknown action '{action}'. Use: check, upgrade, downgrade, or cancel."
 
         except Exception as e:
+            logger.error(
+                f"Subscription error: {e}",
+                extra={"event": "tool_call", "operation": "subscription_management", "outcome": "error"},
+            )
             return f"Error managing subscription: {str(e)}"
         finally:
             conn.close()

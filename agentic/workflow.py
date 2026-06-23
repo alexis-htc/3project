@@ -23,6 +23,7 @@ through update_memory to persist long-term memory, then terminates.
 """
 
 from typing import Dict, Any, List, Optional, Annotated
+import logging
 import operator
 
 from langchain_core.messages import BaseMessage
@@ -41,6 +42,8 @@ from agentic.prompts import MEMORY_SUMMARY_PROMPT
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.prompts.chat import SystemMessagePromptTemplate
+
+logger = logging.getLogger("uda_hub.workflow")
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +120,16 @@ def update_memory(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, An
             resolution="Processed by UDA-Hub",
             customer_preferences=[],
         )
+
+    logger.info(
+        "Memory update",
+        extra={
+            "event": "update_memory",
+            "node": "update_memory",
+            "ticket_id": state.get("ticket_id"),
+            "customer_id": state.get("customer_id") or "unknown",
+        },
+    )
 
     # Persist to long-term memory if available
     customer_id = state.get("customer_id") or "unknown"

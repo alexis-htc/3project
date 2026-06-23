@@ -3,9 +3,12 @@
 import sqlite3
 import os
 import json
+import logging
 from typing import List, Dict, Any
 
 from langchain.tools import tool
+
+logger = logging.getLogger("uda_hub.tools.knowledge_search")
 
 
 def _keyword_score(query_tokens: List[str], text: str) -> float:
@@ -57,6 +60,16 @@ def create_knowledge_search_tool(db_path: str, embeddings=None, vector_store=Non
                         formatted += f"Relevance Score: {score:.3f}\n"
                         formatted += f"Content:\n{doc.page_content}\n"
                         formatted += "-" * 50 + "\n"
+                    logger.info(
+                        "Knowledge search (vector)",
+                        extra={
+                            "event": "tool_call",
+                            "operation": "knowledge_search",
+                            "query": query,
+                            "outcome": "found",
+                            "matches": len(results),
+                        },
+                    )
                     return formatted
             except Exception:
                 pass  # Fall through to keyword search
@@ -112,9 +125,23 @@ def create_knowledge_search_tool(db_path: str, embeddings=None, vector_store=Non
                 formatted += f"Content:\n{r['content']}\n"
                 formatted += "-" * 50 + "\n"
 
+            logger.info(
+                "Knowledge search (keyword)",
+                extra={
+                    "event": "tool_call",
+                    "operation": "knowledge_search",
+                    "query": query,
+                    "outcome": "found",
+                    "matches": len(top_results),
+                },
+            )
             return formatted
 
         except Exception as e:
+            logger.error(
+                f"Knowledge search error: {e}",
+                extra={"event": "tool_call", "operation": "knowledge_search", "outcome": "error"},
+            )
             return f"Error searching knowledge base: {str(e)}"
         finally:
             conn.close()
