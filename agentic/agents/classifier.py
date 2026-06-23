@@ -1,11 +1,14 @@
 """Classifier agent: categorizes incoming support tickets."""
 
 import json
+import logging
 from typing import Dict, Any
 from langchain_core.runnables import RunnableConfig
 
 from agentic.schemas import TicketClassification
 from agentic.prompts import TICKET_CLASSIFICATION_PROMPT
+
+logger = logging.getLogger("uda_hub.agents.classifier")
 
 
 def classify_ticket(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, Any]:
@@ -31,6 +34,21 @@ def classify_ticket(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, 
     )
 
     classification = structured_llm.invoke(prompt)
+
+    logger.info(
+        "Ticket classified",
+        extra={
+            "event": "classify",
+            "node": "classifier",
+            "ticket_id": state.get("ticket_id"),
+            "category": classification.category,
+            "urgency": classification.urgency,
+            "complexity": classification.complexity,
+            "requires_tool": classification.requires_tool,
+            "confidence": classification.confidence,
+            "reasoning": classification.reasoning,
+        },
+    )
 
     return {
         "classification": classification,

@@ -1,13 +1,15 @@
 """
 Utility functions for UDA-Hub.
-Includes the interactive chat interface and helper functions.
+Includes the interactive chat interface, helper functions,
+and structured JSON logging configuration.
 """
 
 import os
 import sys
 import json
 import uuid
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 from dotenv import load_dotenv
@@ -15,6 +17,71 @@ from langchain_openai import ChatOpenAI
 
 # Ensure solution/ is on the path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+
+# ---------------------------------------------------------------------------
+# Structured JSON logging
+# ---------------------------------------------------------------------------
+
+class JSONFormatter(logging.Formatter):
+    """Emit one JSON object per log line (JSONL) for structured, searchable logs."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        log_entry: Dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "event": getattr(record, "event", record.getMessage()),
+        }
+        # Merge any extra structured fields attached to the record
+        for key in ("event", "ticket_id", "customer_id", "category",
+                     "urgency", "complexity", "confidence", "next_step",
+                     "reason", "tools_used", "tools_invoked", "action",
+                     "result", "assigned_to", "needs_escalation",
+                     "query", "matches", "operation", "outcome",
+                     "session_id", "node", "requires_tool", "reasoning"):
+            val = getattr(record, key, None)
+            if val is not None:
+                log_entry[key] = val
+        return json.dumps(log_entry, default=str)
+
+
+def setup_logging(
+    log_file: Optional[str] = None,
+    level: int = logging.DEBUG,
+) -> logging.Logger:
+    """
+    Configure the ``uda_hub`` logger hierarchy to emit JSONL.
+
+    * Writes structured JSON lines to *log_file* (default ``logs/uda_hub.jsonl``).
+    * Also attaches a concise console handler at INFO level for human readability.
+    * Returns the root ``uda_hub`` logger.
+    """
+    if log_file is None:
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, "uda_hub.jsonl")
+
+    root_logger = logging.getLogger("uda_hub")
+    # Avoid adding duplicate handlers on repeated calls
+    if root_logger.handlers:
+        return root_logger
+
+    root_logger.setLevel(level)
+
+    # --- File handler (JSONL) ---
+    fh = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fh.setFormatter(JSONFormatter())
+    root_logger.addHandler(fh)
+
+    # --- Console handler (human-readable) ---
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(logging.Formatter("[%(name)s] %(message)s"))
+    root_logger.addHandler(ch)
+
+    return root_logger
 
 from agentic.workflow import create_workflow
 from agentic.memory import LongTermMemory
@@ -119,21 +186,38 @@ class UDAHub:
         model_name: str = "gpt-4o",
         temperature: float = 0.1,
     ):
+        self.logger = setup_logging()
         self.llm = create_llm(api_key, model_name, temperature)
         self.tools = build_tools()
         self.workflow = create_workflow()
         self.long_term_memory = LongTermMemory(MEMORY_DB)
         self.session_id: Optional[str] = None
         self.customer_id: Optional[str] = None
+        self.logger.info("UDAHub initialised", extra={"event": "hub_init", "model": model_name})
 
     def start_session(self, customer_id: str = "unknown") -> str:
         self.session_id = str(uuid.uuid4())
         self.customer_id = customer_id
+        self.logger.info(
+            "Session started",
+            extra={"event": "session_start", "session_id": self.session_id, "customer_id": customer_id},
+        )
         return self.session_id
 
     def process_ticket(self, ticket_text: str, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if not self.session_id:
             self.start_session()
+
+        ticket_id = str(uuid.uuid4())[:8]
+        self.logger.info(
+            "Ticket received",
+            extra={
+                "event": "ticket_received",
+                "ticket_id": ticket_id,
+                "customer_id": self.customer_id,
+                "session_id": self.session_id,
+            },
+        )
 
         customer_history = self.long_term_memory.get_customer_history(self.customer_id or "unknown")
 
@@ -149,7 +233,7 @@ class UDAHub:
         initial_state = {
             "messages": [],
             "user_input": ticket_text,
-            "ticket_id": str(uuid.uuid4())[:8],
+            "ticket_id": ticket_id,
             "customer_id": self.customer_id,
             "ticket_metadata": metadata or {},
             "classification": None,
@@ -165,6 +249,16 @@ class UDAHub:
 
         try:
             final_state = self.workflow.invoke(initial_state, config=config)
+
+            self.logger.info(
+                "Ticket processing complete",
+                extra={
+                    "event": "ticket_complete",
+                    "ticket_id": ticket_id,
+                    "actions_taken": final_state.get("actions_taken", []),
+                    "tools_used": final_state.get("tools_used", []),
+                },
+            )
 
             # Store conversation in long-term memory
             self.long_term_memory.store_conversation_message(
@@ -199,6 +293,18 @@ class UDAHub:
 
             classification = final_state.get("classification")
 
+            outcome = "escalated" if escalation_resp is not None else "resolved"
+            self.logger.info(
+                f"Ticket outcome: {outcome}",
+                extra={
+                    "event": "ticket_outcome",
+                    "ticket_id": ticket_id,
+                    "outcome": outcome,
+                    "confidence": resolver_resp.confidence if resolver_resp else None,
+                    "category": classification.category if classification else None,
+                },
+            )
+
             return {
                 "success": True,
                 "response": response_text,
@@ -210,6 +316,10 @@ class UDAHub:
             }
 
         except Exception as e:
+            self.logger.error(
+                f"Ticket processing failed: {e}",
+                extra={"event": "ticket_error", "ticket_id": ticket_id, "reason": str(e)},
+            )
             return {
                 "success": False,
                 "error": str(e),

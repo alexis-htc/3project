@@ -1,11 +1,14 @@
 """Escalation agent: handles tickets that cannot be auto-resolved."""
 
 import json
+import logging
 from typing import Dict, Any
 from langchain_core.runnables import RunnableConfig
 
 from agentic.schemas import EscalationResponse
 from agentic.prompts import get_escalation_prompt
+
+logger = logging.getLogger("uda_hub.agents.escalation")
 
 
 def escalate_ticket(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, Any]:
@@ -36,6 +39,17 @@ def escalate_ticket(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, 
     }).to_messages()
 
     escalation_response = structured_llm.invoke(messages)
+
+    logger.info(
+        "Ticket escalated",
+        extra={
+            "event": "escalate",
+            "node": "escalation",
+            "ticket_id": state.get("ticket_id"),
+            "assigned_to": escalation_response.assigned_to,
+            "reason": escalation_response.reason,
+        },
+    )
 
     return {
         "escalation_response": escalation_response,

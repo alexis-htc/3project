@@ -1,6 +1,7 @@
 """Resolver agent: attempts to resolve tickets using RAG and tools."""
 
 import json
+import logging
 from typing import Dict, Any, List
 from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import ToolMessage
@@ -8,6 +9,8 @@ from langgraph.prebuilt import create_react_agent
 
 from agentic.schemas import ResolverResponse
 from agentic.prompts import get_resolver_prompt
+
+logger = logging.getLogger("uda_hub.agents.resolver")
 
 
 def resolve_ticket(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, Any]:
@@ -40,6 +43,11 @@ def resolve_ticket(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, A
         model=llm_with_tools,
         tools=tools,
         response_format=ResolverResponse,
+    )
+
+    logger.debug(
+        "Resolver invoked",
+        extra={"event": "resolve_start", "node": "resolver", "ticket_id": state.get("ticket_id")},
     )
 
     result = agent.invoke({"messages": messages})
@@ -88,6 +96,19 @@ def resolve_ticket(state: Dict[str, Any], config: RunnableConfig) -> Dict[str, A
         next_step = "escalation"
     else:
         next_step = "end"
+
+    logger.info(
+        "Resolution attempt complete",
+        extra={
+            "event": "resolve",
+            "node": "resolver",
+            "ticket_id": state.get("ticket_id"),
+            "confidence": resolver_response.confidence,
+            "needs_escalation": resolver_response.needs_escalation,
+            "tools_invoked": tools_used,
+            "next_step": next_step,
+        },
+    )
 
     return {
         "messages": result_messages,

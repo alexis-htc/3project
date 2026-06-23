@@ -3,7 +3,10 @@
 import sqlite3
 import os
 import json
+import logging
 from langchain.tools import tool
+
+logger = logging.getLogger("uda_hub.tools.account_lookup")
 
 
 def create_account_lookup_tool(db_path: str):
@@ -112,9 +115,23 @@ def create_account_lookup_tool(db_path: str):
                     for b in bookings
                 ]
 
+            logger.info(
+                "Account lookup success",
+                extra={
+                    "event": "tool_call",
+                    "operation": "account_lookup",
+                    "query": customer_identifier,
+                    "outcome": "found",
+                    "customer_id": result["customer_id"],
+                },
+            )
             return json.dumps(result, indent=2)
 
         except Exception as e:
+            logger.error(
+                f"Account lookup error: {e}",
+                extra={"event": "tool_call", "operation": "account_lookup", "outcome": "error"},
+            )
             return f"Error looking up account: {str(e)}"
         finally:
             conn.close()
